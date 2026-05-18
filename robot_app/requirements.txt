@@ -1,0 +1,3 @@
+odrive
+pyserial
+pygame
