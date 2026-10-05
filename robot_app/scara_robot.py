@@ -6,7 +6,7 @@ class ScaraRobot:
     def __init__(self, use_arduino: bool, use_odrv: bool):
         self.kinematics = ScaraKinematics()
         
-        self.arduino = ArduinoController(is_enabled=use_arduino, port='/dev/ttyUSB0')
+        self.arduino = ArduinoController(is_enabled=use_arduino, port='/dev/ttyUSB0', baudrate=9600)
         self.odrive = OdriveController(is_enable=use_odrv)
         
         self.current_pos = CartesianPositions(0, 0, 0, 0)
@@ -14,6 +14,10 @@ class ScaraRobot:
         self.gripper_state = False
     
         self.last_update_time = 0
+
+        self.MAX_SPEED_XY = 300  # mm/s
+        self.MAX_SPEED_C = 100   # rad/s
+        self.MAX_SPEED_Z = 100   # mm/s
         
     def initHardware(self):
         print("Inicjalizajca hardwaru robota...")
@@ -23,7 +27,7 @@ class ScaraRobot:
         
         A, B = self.odrive.get_position()
         
-        start_joint = JointPositions(A=A, B=B, gam=200, Z=300) #wartosci początkowe z kodu
+        start_joint = JointPositions(A=A, B=B, gam=0, Z=300) #wartosci początkowe z kodu
 
         self.current_pos = self.kinematics.forward_kinematics(start_joint)
         
@@ -31,7 +35,22 @@ class ScaraRobot:
         print(f"Pozycja początkowa: X={self.current_pos.X} Y={self.current_pos.Y} C={self.current_pos.C} Z={self.current_pos.Z}")
         
         
-    def move_to_pos(self, position: CartesianPositions):
+    def move_to_pos(self, position: CartesianPositions, dt: float):
+        # ograniczenia w prędkości 
+        #mozna w przyszłosci tu dodac ograniczenie przyśpieszania i hamowania
+        if abs(position.X - self.current_pos.X) > dt * self.MAX_SPEED_XY:
+            sign_x = 1 if position.X > self.current_pos.X else -1
+            position.X = self.current_pos.X + sign_x * dt * self.MAX_SPEED_XY
+        if abs(position.Y - self.current_pos.Y) > dt * self.MAX_SPEED_XY:
+            sign_y = 1 if position.Y > self.current_pos.Y else -1
+            position.Y = self.current_pos.Y + sign_y * dt * self.MAX_SPEED_XY
+        if abs(position.C - self.current_pos.C) > dt * self.MAX_SPEED_C:
+            sign_c = 1 if position.C > self.current_pos.C else -1
+            position.C = self.current_pos.C + sign_c * dt * self.MAX_SPEED_C
+        if abs(position.Z - self.current_pos.Z) > dt * self.MAX_SPEED_Z:
+            sign_z = 1 if position.Z > self.current_pos.Z else -1
+            position.Z = self.current_pos.Z + sign_z * dt * self.MAX_SPEED_Z
+        
         target_joints = self.kinematics.inverse_kinematics(position)
         
         if target_joints is None or not self.kinematics.check_limits(target_joints):

@@ -4,6 +4,7 @@ import odrive
 from odrive.enums import AxisState
 
 import serial
+import struct
 
 
 class OdriveController:
@@ -43,8 +44,8 @@ class OdriveController:
         self.odrv.axis0.requested_state = AxisState.CLOSED_LOOP_CONTROL
         self.odrv.axis1.requested_state = AxisState.CLOSED_LOOP_CONTROL
     
-        self.odrv.axis0.controller.pos_setpoint = 0
-        self.odrv.axis1.controller.pos_setpoint = 0
+        self.odrv.axis0.controller.input_pos = 0
+        self.odrv.axis1.controller.input_pos = 0
         
         print("[ODRIVE] - Gotowy!!")
         
@@ -55,8 +56,8 @@ class OdriveController:
         axis0_target = -a + self.offset_AL + self.magic_const1	
         axis1_target = -b + self.offset_BR + self.magic_const2
         
-        self.odrv.axis0.controller.pos_setpoint = axis0_target
-        self.odrv.axis1.controller.pos_setpoint = axis1_target
+        self.odrv.axis0.controller.input_pos = axis0_target
+        self.odrv.axis1.controller.input_pos = axis1_target
 
 
     def get_position(self) -> tuple[float, float]:
@@ -79,8 +80,8 @@ class OdriveController:
                 aktualna_poz_0 = self.odrv.axis0.encoder.pos_estimate
                 aktualna_poz_1 = self.odrv.axis1.encoder.pos_estimate
 
-                self.odrv.axis0.controller.pos_setpoint = aktualna_poz_0
-                self.odrv.axis1.controller.pos_setpoint = aktualna_poz_1
+                self.odrv.axis0.controller.input_pos = aktualna_poz_0
+                self.odrv.axis1.controller.input_pos = aktualna_poz_1
 
                 self.odrv.axis0.requested_state = AxisState.CLOSED_LOOP_CONTROL
                 self.odrv.axis1.requested_state = AxisState.CLOSED_LOOP_CONTROL
@@ -113,7 +114,7 @@ class ArduinoController:
 
         print(f"[Arduino] Szukam płytki na porcie {self.port}...")
         try:
-            self.serial_conn = serial.Serial(self.port, self.baudrate)
+            self.serial_conn = serial.Serial(self.port, baudrate=self.baudrate)
             self.serial_conn.reset_output_buffer()
             self.serial_conn.reset_input_buffer()
             print("[Arduino] Połączono.")
@@ -131,20 +132,49 @@ class ArduinoController:
         z_int = int(z_steps)
 
         
-        # W kodzie głównym było Zprev != Z
-        if self._last_sent_z != z_int:
-            cmd_z = f"z 0 {z_int}\n"
-            self.serial_conn.write(cmd_z.encode('utf-8'))
+        # wysyłamy tylko gdy się zmienią
+        if (self._last_sent_z != z_int) or (self._last_sent_c != gam_int):
+            binary_cmd = struct.pack('<chh', b'p', z_int, gam_int)
+            self.serial_conn.write(binary_cmd)
+            self.serial_conn.flush()
             self._last_sent_z = z_int
-            #print(f"cmdZ: {cmd_z}")
-            
-        # Komenda dla osi C
-        if self._last_sent_c != gam_int:
-            cmd_c = f"b 0 {gam_int}\n"
-            self.serial_conn.write(cmd_c.encode('utf-8'))
             self._last_sent_c = gam_int
-            #print(f"cmdC: {cmd_c}")
+            #print(f"[Arduino] command send: {binary_cmd}")
+
+    def read_positions(self) -> tuple[float, float] | None:
+        if not self.is_enabled or self.serial_conn is None:
+            return None
+
+        latest_z, latest_c = None, None
+
+        # Dopóki w buforze jest przynajmniej jedna pełna ramka (5 bajtów)
+        while self.serial_conn.in_waiting >= 5:
+            # Odczytujemy dokładnie 5 bajtów z bufora bez blokowania
+            data = self.serial_conn.read(5) 
+            
+            try:
+                cmd_type, z_pos, c_pos = struct.unpack('<chh', data)
                 
+                # Czy to ramka pozycji
+                if cmd_type == b'p':
+                    latest_z = float(z_pos)
+                    latest_c = float(c_pos)
+                else:
+                    # Jeśli pierwszy bajt to nie 'p', wyczyść bufor
+                    self.serial_conn.reset_input_buffer()
+                    break
+            except struct.error:
+                # błąd parsowania
+                self.serial_conn.reset_input_buffer()
+                break
+
+        # Jeśli odczytaliśmy jakiekolwiek poprawne dane, zwracamy te najnowsze
+        if latest_z is not None:
+            return (latest_z, latest_c)
+        
+        # Zwracamy None, gdy nie ma nic nowego (żeby w app.py nie nadpisać pozycji zerami)
+        return None
+         
     def set_gripper(self, state: bool):
         if not self.is_enabled:
             return
