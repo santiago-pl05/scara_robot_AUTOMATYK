@@ -89,8 +89,8 @@ class ScaraKinematics:
 
     #odpowienik check litmitsC
     def check_limits_c(self, C: float) -> float:
-        if C < 0:
-            return 0.0
+        if C < -200:
+            return -200.0
         elif C > 200:
             return 200.0
         return C

@@ -16,8 +16,8 @@ class ScaraRobot:
         self.last_update_time = 0
 
         self.MAX_SPEED_XY = 300  # mm/s
-        self.MAX_SPEED_C = 100   # rad/s
-        self.MAX_SPEED_Z = 100   # mm/s
+        self.MAX_SPEED_C = 100   # deg/s (kąt C jest w stopniach)
+        self.MAX_SPEED_Z = 50    # mm/s
         
     def initHardware(self):
         print("Inicjalizajca hardwaru robota...")
@@ -28,8 +28,10 @@ class ScaraRobot:
         A, B = self.odrive.get_position()
         
         start_joint = JointPositions(A=A, B=B, gam=0, Z=300) #wartosci początkowe z kodu
+        self.current_joints = start_joint
 
         self.current_pos = self.kinematics.forward_kinematics(start_joint)
+        self.arduino.send_positions(start_joint.gam, start_joint.Z)
         
         print("Hardware zaincjalizowany")
         print(f"Pozycja początkowa: X={self.current_pos.X} Y={self.current_pos.Y} C={self.current_pos.C} Z={self.current_pos.Z}")
@@ -60,11 +62,11 @@ class ScaraRobot:
         target_joints.gam = self.kinematics.check_limits_c(target_joints.gam)
         
         self.odrive.set_position(target_joints.A, target_joints.B)
-        #print(target_joints.gam, target_joints.Z)
+        # print(target_joints.gam, target_joints.Z)
         self.arduino.send_positions(target_joints.gam, target_joints.Z)
         
-        #self.current_pos = position
-        #self.current_joints = target_joints
+        self.current_pos = position
+        self.current_joints = target_joints
         
         return True
     
@@ -79,15 +81,11 @@ class ScaraRobot:
     def loop(self, cur_time):
         time_since_elapse = cur_time - self.last_update_time
         
-        actual_a, actual_b = self.odrive.get_position()
-        
-        self.current_joints.A = actual_a
-        self.current_joints.B = actual_b
-        
-        self.current_joints.gam = self.arduino._last_sent_c
-        self.current_joints.Z = self.arduino._last_sent_z
-        
-        self.current_pos = self.kinematics.forward_kinematics(self.current_joints)
+        if self.odrive.is_enable:
+            actual_a, actual_b = self.odrive.get_position()
+            self.current_joints.A = actual_a
+            self.current_joints.B = actual_b
+            self.current_pos = self.kinematics.forward_kinematics(self.current_joints)
         
         if time_since_elapse >= 0.1:
             self.last_update_time = cur_time

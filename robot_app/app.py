@@ -7,7 +7,7 @@ from scara_kinematics.datatypes import CartesianPositions, JointPositions
 
 from time import time, sleep
 
-FREQ = 80 * 2
+FREQ = 80/2
 LOOP_TIME = 1 / FREQ
 
 def main():    
@@ -18,7 +18,7 @@ def main():
     CSpeedPadMultiplyer = 2 * (150 / FREQ)
     ZSpeedPadMultiplyer = 7 * (150 / FREQ)
     
-    robot = ScaraRobot(use_arduino=False, use_odrv=True)
+    robot = ScaraRobot(use_arduino=True, use_odrv=False)
     pad = GamePadInput()
     planner = ManualTeleopPlanner(pad, FREQ)
     #planner = AutonomousTrajectoryPlanner()
@@ -34,7 +34,7 @@ def main():
         pad_gripper = pad_state.gripper_toogle
         pad_mode = pad_state.mode_switch
         
-        # print(f"Input pada - X: {padX} Y: {padY} C: {padC} Z:{padZ},") # d
+        # print(f"Input pada - X: {pad_state.delta_x} Y: {pad_state.delta_y} C: {pad_state.delta_c} Z:{pad_state.delta_z},") # d
         
         # sterowanie gripperem
         if pad_gripper:

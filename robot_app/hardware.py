@@ -12,13 +12,16 @@ class OdriveController:
         self.is_enable = is_enable
         self.odrv = None
         
-        self.offset_AL = -6932 #dojechac do zderzenia A z lewą stroną ramy i wpisac wartosc tutaj
-        self.offset_BR = 8777
-        self.magic_const1 = 21775
-        self.magic_const2 = -1295
+        self.offset_AL = -6932 / 8192.0 #dojechac do zderzenia A z lewą stroną ramy i wpisac wartosc tutaj
+        self.offset_BR = 8777 / 8192.0
+        self.magic_const1 = 21775 / 8192.0
+        self.magic_const2 = -1295 / 8192.0
         
         self.is_idle = False 
         # true: iddle, false: pos_control
+
+        self._sim_a = 10106.0
+        self._sim_b = 1.0
     
     def connect_and_calibrate(self):
         if self.is_enable == False:
@@ -51,6 +54,8 @@ class OdriveController:
         
     def set_position(self, a: float, b: float): 
         if self.is_enable == False:
+            self._sim_a = a
+            self._sim_b = b
             return
         
         axis0_target = -a + self.offset_AL + self.magic_const1	
@@ -62,7 +67,7 @@ class OdriveController:
 
     def get_position(self) -> tuple[float, float]:
         if self.is_enable == False:
-            return (0.0, 0.0)
+            return (self._sim_a, self._sim_b)
         
         axis0_raw = self.odrv.axis0.encoder.pos_estimate
         axis1_raw = self.odrv.axis1.encoder.pos_estimate
@@ -98,14 +103,14 @@ class OdriveController:
         self.is_idle = not self.is_idle                                   
     
 class ArduinoController:
-    def __init__(self, port: str = '/dev/ttyUSB0', baudrate: int = 115200, is_enabled: bool = True):
+    def __init__(self, port: str = '/dev/ttyUSB0', baudrate: int = 9600, is_enabled: bool = True):
         self.is_enabled = is_enabled
         self.port = port
         self.baudrate = baudrate
         self.serial_conn = None
         
-        self._last_sent_z = 0 
-        self._last_sent_c = 0 
+        self._last_sent_z = None 
+        self._last_sent_c = None 
 
     def connect(self):
         if not self.is_enabled:
@@ -127,19 +132,26 @@ class ArduinoController:
         if not self.is_enabled:
             return
         
-        # Rzutujemy na int, ponieważ Arduino prawdopodobnie oczekuje liczb całkowitych dla kroków
-        gam_int = int(gam_steps)
-        z_int = int(z_steps)
+        # Rzutujemy na int, zaokrąglając do najbliższego pełnego kroku
+        gam_int = int(round(gam_steps))
+        z_int = int(round(z_steps))
 
         
-        # wysyłamy tylko gdy się zmienią
-        if (self._last_sent_z != z_int) or (self._last_sent_c != gam_int):
-            binary_cmd = struct.pack('<chh', b'p', z_int, gam_int)
-            self.serial_conn.write(binary_cmd)
+        # Komenda dla osi Z
+        if self._last_sent_z != z_int:
+            cmd_z = f"z 0 {z_int}\n"
+            self.serial_conn.write(cmd_z.encode('utf-8'))
             self.serial_conn.flush()
             self._last_sent_z = z_int
+            print(f"[Arduino] command send: {cmd_z.strip()}")
+            
+        # Komenda dla osi C (b)
+        if self._last_sent_c != gam_int:
+            cmd_c = f"b 0 {gam_int}\n"
+            self.serial_conn.write(cmd_c.encode('utf-8'))
+            self.serial_conn.flush()
             self._last_sent_c = gam_int
-            #print(f"[Arduino] command send: {binary_cmd}")
+            print(f"[Arduino] command send: {cmd_c.strip()}")
 
     def read_positions(self) -> tuple[float, float] | None:
         if not self.is_enabled or self.serial_conn is None:
